@@ -9,6 +9,36 @@ const saltRounds = 10;
 // middleware
 app.use(cors());
 app.use(express.json());
+
+// const serviceAccount = require("./firebase-admin-key.json");
+var admin = require("firebase-admin");
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
+const serviceAccount = JSON.parse(decoded);
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+const verifyFBToken = async (req, res, next) => {
+    const token = req.headers.authorization;
+
+    if (!token) {
+        return res.status(401).send({ message: 'unauthorized access' })
+    }
+
+    try {
+        const idToken = token.split(' ')[1];
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        console.log('decoded in the token', decoded);
+        req.decoded_email = decoded.email;
+        next();
+    }
+    catch (err) {
+        return res.status(401).send({ message: 'unauthorized access' })
+    }
+
+
+}
+
 const uri = process.env.MONGO_URI;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -38,9 +68,18 @@ async function run() {
         console.log(user);
         user.role = "user";
         user.createdAt = new Date();
+        const email = req.body.email;
+        const query = { email: email };
+        const existingUser = await usersCollection.findOne(query);
 
-        const result = await userCollection.insertOne(user);
-        res.status(201).json(result);
+        if (existingUser) {
+          res.send({
+            message: "user already exits. do not need to insert again",
+          });
+        } else {
+          const result = await userCollection.insertOne(user);
+          res.status(201).json(result);
+        }
       } catch (err) {
         res.status(500).json({ message: "Failed to save user" });
       }
@@ -51,10 +90,19 @@ async function run() {
         console.log(guser);
         guser.role = "user";
         guser.createdAt = new Date();
+        const email = req.body.email;
+        const query = { email: email };
+        const existingUser = await usersCollection.findOne(query);
 
-        const result = await googleUserCollection.insertOne(guser);
-        const result2 = await userCollection.insertOne(guser);
-        res.status(201).json(result);
+        if (existingUser) {
+          res.send({
+            message: "user already exits. do not need to insert again",
+          });
+        } else {
+          const result = await googleUserCollection.insertOne(guser);
+          const result2 = await userCollection.insertOne(guser);
+          res.status(201).json(result);
+        }
       } catch (err) {
         res.status(500).json({ message: "Failed to save user" });
       }
