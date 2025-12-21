@@ -1,43 +1,50 @@
 require("dotenv").config();
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const express = require("express");
 const cors = require("cors");
 const app = express();
 const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 const port = process.env.PORT || 3000;
 const saltRounds = 10;
 // middleware
 app.use(cors());
 app.use(express.json());
 
-// const serviceAccount = require("./firebase-admin-key.json");
 var admin = require("firebase-admin");
-const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+  "utf8"
+);
 const serviceAccount = JSON.parse(decoded);
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
 
 const verifyFBToken = async (req, res, next) => {
-    const token = req.headers.authorization;
+  const token = req.headers.authorization;
+  console.log("Authorization header:", token);
+  if (!token) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
 
-    if (!token) {
-        return res.status(401).send({ message: 'unauthorized access' })
-    }
+  try {
+    const idToken = token.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    console.log("decoded in the token", decoded);
+    req.decoded_email = decoded.email;
+    next();
+  } catch (err) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+};
 
-    try {
-        const idToken = token.split(' ')[1];
-        const decoded = await admin.auth().verifyIdToken(idToken);
-        console.log('decoded in the token', decoded);
-        req.decoded_email = decoded.email;
-        next();
-    }
-    catch (err) {
-        return res.status(401).send({ message: 'unauthorized access' })
-    }
-
-
-}
+const verifyAdmin = async (req, res, next) => {
+  const user = await userCollection.findOne({ email: req.email });
+  if (user?.role !== "admin") {
+    return res.status(403).send({ message: "Admin only" });
+  }
+  next();
+};
 
 const uri = process.env.MONGO_URI;
 
@@ -60,6 +67,9 @@ async function run() {
     const decorationDb = client.db("decorationDB");
     const userCollection = decorationDb.collection("users");
     const googleUserCollection = decorationDb.collection("googleusers");
+    const servicesCollection = decorationDb.collection("services");
+    const decoratorsCollection = decorationDb.collection("decorators");
+    const bookingsCollection = decorationDb.collection("bookings");
     app.post("/users", async (req, res) => {
       try {
         const user = req.body;
@@ -70,7 +80,7 @@ async function run() {
         user.createdAt = new Date();
         const email = req.body.email;
         const query = { email: email };
-        const existingUser = await usersCollection.findOne(query);
+        const existingUser = await userCollection.findOne(query);
 
         if (existingUser) {
           res.send({
@@ -92,7 +102,7 @@ async function run() {
         guser.createdAt = new Date();
         const email = req.body.email;
         const query = { email: email };
-        const existingUser = await usersCollection.findOne(query);
+        const existingUser = await userCollection.findOne(query);
 
         if (existingUser) {
           res.send({
@@ -110,6 +120,50 @@ async function run() {
     app.get("/googleUsers", async (req, res) => {
       res.send("Hello from google users post");
     });
+
+    app.post("/login", async (req, res) => {
+      const { email, password } = req.body;
+
+      try {
+        const user = await userCollection.findOne({ email });
+        if (!user) {
+          return res.status(401).send({ message: "Invalid credentials" });
+        }
+
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+          return res.status(401).send({ message: "Invalid credentials" });
+        }
+
+        const token = jwt.sign(
+          { email: user.email, role: user.role },
+          process.env.JWT_SECRET,
+          { expiresIn: "7d" }
+        );
+
+        res.send({
+          token,
+          user: {
+            email: user.email,
+            role: user.role,
+          },
+        });
+      } catch (err) {
+        res.status(500).send({ message: "Login failed" });
+      }
+    });
+
+    app.get("/services", async (req, res) => {
+      try {
+        const services = await servicesCollection.find().toArray();
+        res.send(services);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to fetch services" });
+      }
+    });
+    
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
