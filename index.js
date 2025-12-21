@@ -201,6 +201,24 @@ async function run() {
       }
     });
 
+        app.put("/services/edit/:id", verifyFBToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updatedData = req.body;
+        delete updatedData.createdByEmail;
+
+        const result = await servicesCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updatedData }
+        );
+
+        res.send(result);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to update service" });
+      }
+    });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
