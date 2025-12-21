@@ -186,7 +186,20 @@ async function run() {
         res.status(500).send({ error: "Failed to delete service" });
       }
     });
-
+     app.post("/admin/services", verifyFBToken, async (req, res) => {
+      try {
+        const service = {
+          ...req.body,
+          createdByEmail: req.decoded_email,
+          createdAt: new Date(),
+        };
+        const result = await servicesCollection.insertOne(service);
+        res.status(201).send(result);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to create service" });
+      }
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
