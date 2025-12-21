@@ -174,6 +174,19 @@ async function run() {
         res.status(500).send({ error: "Failed to fetch service" });
       }
     });
+     app.delete("/services/:id", verifyFBToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await servicesCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+        res.send(result);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to delete service" });
+      }
+    });
+
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
