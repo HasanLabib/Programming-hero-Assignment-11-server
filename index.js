@@ -162,7 +162,18 @@ async function run() {
         res.status(500).send({ error: "Failed to fetch services" });
       }
     });
-    
+    app.get("/services/:id", verifyFBToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const service = await servicesCollection.findOne({
+          _id: new ObjectId(id),
+        });
+        res.send(service);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to fetch service" });
+      }
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
