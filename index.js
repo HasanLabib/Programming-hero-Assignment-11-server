@@ -117,6 +117,20 @@ async function run() {
         res.status(500).json({ message: "Failed to save user" });
       }
     });
+    app.get("/users/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const user = await userCollection.findOne({ email });
+        if (user) {
+          res.send(user);
+        } else {
+          res.status(404).send({ message: "User not found" });
+        }
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch user" });
+      }
+    });
+
     app.get("/googleUsers", async (req, res) => {
       res.send("Hello from google users post");
     });
@@ -174,7 +188,7 @@ async function run() {
         res.status(500).send({ error: "Failed to fetch service" });
       }
     });
-     app.delete("/services/:id", verifyFBToken, async (req, res) => {
+    app.delete("/services/:id", verifyFBToken, async (req, res) => {
       try {
         const id = req.params.id;
         const result = await servicesCollection.deleteOne({
@@ -186,7 +200,7 @@ async function run() {
         res.status(500).send({ error: "Failed to delete service" });
       }
     });
-     app.post("/admin/services", verifyFBToken, async (req, res) => {
+    app.post("/admin/services", verifyFBToken, async (req, res) => {
       try {
         const service = {
           ...req.body,
@@ -201,7 +215,7 @@ async function run() {
       }
     });
 
-        app.put("/services/edit/:id", verifyFBToken, async (req, res) => {
+    app.put("/services/edit/:id", verifyFBToken, async (req, res) => {
       try {
         const id = req.params.id;
         const updatedData = req.body;
@@ -217,6 +231,12 @@ async function run() {
         console.error(err);
         res.status(500).send({ error: "Failed to update service" });
       }
+    });
+
+    app.post("/create-payment-intent", verifyFBToken, async (req, res) => {
+      const information = req.body;
+
+      console.log(information);
     });
 
     // Send a ping to confirm a successful connection
