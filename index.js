@@ -6,6 +6,9 @@ const app = express();
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const port = process.env.PORT || 3000;
+const Stripe = require("stripe");
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
 const saltRounds = 10;
 // middleware
 app.use(cors());
@@ -70,12 +73,13 @@ async function run() {
     const servicesCollection = decorationDb.collection("services");
     const decoratorsCollection = decorationDb.collection("decorators");
     const bookingsCollection = decorationDb.collection("bookings");
+    const paymentCollection = decorationDb.collection("payment");
     app.post("/users", async (req, res) => {
       try {
         const user = req.body;
         const hashedPassword = await bcrypt.hash(user?.password, saltRounds);
         user.password = hashedPassword;
-       // console.log(user);
+        // console.log(user);
         user.role = "user";
         user.createdAt = new Date();
         const email = req.body.email;
@@ -232,12 +236,77 @@ async function run() {
       }
     });
 
-    app.post("/create-payment-intent", verifyFBToken, async (req, res) => {
-      const information = req.body;
+    app.post("/create-checkout-session", verifyFBToken, async (req, res) => {
+      const booking = await bookingsCollection.findOne({
+        _id: new ObjectId(req.body.bookingId),
+      });
+      console.log(booking);
+      if (booking.paymentStatus === "paid") {
+        return res.status(400).send({ message: "Already paid" });
+      }
 
-      //console.log(information);
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        payment_method_types: ["card"],
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: booking.serviceName },
+              unit_amount: booking.serviceCost * 100,
+            },
+            quantity: 1,
+          },
+        ],
+        metadata: {
+          bookingId: booking._id.toString(),
+          userEmail: booking.userEmail,
+        },
+        success_url: `${process.env.CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.CLIENT_URL}/payment-cancel`,
+      });
+
+      res.send({ url: session.url });
     });
 
+    app.post("/confirm-payment", async (req, res) => {
+      const session = await stripe.checkout.sessions.retrieve(
+        req.body.sessionId
+      );
+      console.log(session)
+
+      if (session.payment_status !== "paid") {
+        return res.status(400).send({ message: "Not paid" });
+      }
+
+       await paymentCollection.insertOne({
+        bookingId: session.metadata.bookingId,
+        userEmail: session.metadata.userEmail,
+        amount: session.amount_total / 100,
+        transactionId: session.payment_intent,
+        paymentDate: new Date(),
+        status: "success",
+      });
+
+      await bookingsCollection.updateOne(
+        { _id: new ObjectId(session.metadata.bookingId) },
+        {
+          $set: {
+            paymentStatus: "paid",
+            status: "confirmed",
+          },
+        }
+      );
+
+      res.send({ success: true });
+    });
+    app.delete("/bookings/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await bookingsCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
+    });
     app.put("/users/update/:email", async (req, res) => {
       try {
         const email = req.params.email;
