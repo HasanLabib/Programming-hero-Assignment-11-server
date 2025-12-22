@@ -273,13 +273,13 @@ async function run() {
       const session = await stripe.checkout.sessions.retrieve(
         req.body.sessionId
       );
-      console.log(session)
+      console.log(session);
 
       if (session.payment_status !== "paid") {
         return res.status(400).send({ message: "Not paid" });
       }
 
-       await paymentCollection.insertOne({
+      await paymentCollection.insertOne({
         bookingId: session.metadata.bookingId,
         userEmail: session.metadata.userEmail,
         amount: session.amount_total / 100,
@@ -300,6 +300,18 @@ async function run() {
 
       res.send({ success: true });
     });
+
+    app.get("/payments/user/:email", async (req, res) => {
+      const email = req.params.email;
+
+      const payments = await paymentCollection
+        .find({ userEmail: email })
+        .sort({ paymentDate: -1 })
+        .toArray();
+
+      res.send(payments);
+    });
+
     app.delete("/bookings/:id", async (req, res) => {
       const id = req.params.id;
       const result = await bookingsCollection.deleteOne({
