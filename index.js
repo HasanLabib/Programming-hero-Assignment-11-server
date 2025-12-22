@@ -250,7 +250,7 @@ async function run() {
       const booking = await bookingsCollection.findOne({
         _id: new ObjectId(req.body.bookingId),
       });
-      console.log(booking);
+      //console.log(booking);
       if (booking.paymentStatus === "paid") {
         return res.status(400).send({ message: "Already paid" });
       }
@@ -283,7 +283,7 @@ async function run() {
       const session = await stripe.checkout.sessions.retrieve(
         req.body.sessionId
       );
-      console.log(session);
+      //console.log(session);
 
       if (session.payment_status !== "paid") {
         return res.status(400).send({ message: "Not paid" });
@@ -333,7 +333,7 @@ async function run() {
       try {
         const email = req.params.email;
         const updatedData = req.body;
-        console.log(updatedData, email);
+        //console.log(updatedData, email);
         const result = await userCollection.updateOne(
           { email: email },
           { $set: updatedData }
@@ -495,10 +495,10 @@ async function run() {
         const adminUser = await userCollection.findOne({
           email: req.decoded_email,
         });
-        console.log(adminUser);
+       // console.log(adminUser);
 
         const users = await userCollection.find().toArray();
-        console.log(users);
+       // console.log(users);
         res.send(users);
       } catch (err) {
         res.status(500).send({ message: "Failed to fetch users" });
@@ -660,6 +660,35 @@ async function run() {
       );
 
       res.send(result);
+    });
+    app.get("/decorator/earnings/:email", async (req, res) => {
+      const email = req.params.email;
+
+      const result = await bookingsCollection
+        .aggregate([
+          {
+            $match: {
+              assignedDecorator: email,
+              paymentStatus: "paid",
+              status: "completed",
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalEarnings: { $sum: "$serviceCost" },
+              totalProjects: { $sum: 1 },
+            },
+          },
+        ])
+        .toArray();
+
+      res.send(
+        result[0] || {
+          totalEarnings: 0,
+          totalProjects: 0,
+        }
+      );
     });
 
     // Send a ping to confirm a successful connection
