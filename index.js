@@ -10,6 +10,16 @@ const Stripe = require("stripe");
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const saltRounds = 10;
+
+const statusFlow = [
+  "Assigned",
+  "Planning Phase",
+  "Materials Prepared",
+  "On the Way to Venue",
+  "Setup in Progress",
+  "Completed",
+];
+
 // middleware
 app.use(cors());
 app.use(express.json());
@@ -446,6 +456,210 @@ async function run() {
       }
 
       res.send({ role: user.role });
+    });
+
+    app.get("/admin/decorators", verifyFBToken, async (req, res) => {
+      try {
+        const user = await userCollection.findOne({ email: req.decoded_email });
+        if (user?.role !== "admin") {
+          return res.status(403).send({ message: "Admin only" });
+        }
+
+        const decorators = await userCollection
+          .find({ role: "decorator" })
+          .toArray();
+        res.send(decorators);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ message: "Failed to fetch decorators" });
+      }
+    });
+
+    app.patch(
+      "/admin/decorator-status/:email",
+      verifyFBToken,
+      async (req, res) => {
+        const { status } = req.body;
+        const email = req.params.email;
+
+        const result = await userCollection.updateOne(
+          { email, role: "decorator" },
+          { $set: { status } }
+        );
+
+        res.send(result);
+      }
+    );
+    app.get("/admin/users", async (req, res) => {
+      try {
+        const adminUser = await userCollection.findOne({
+          email: req.decoded_email,
+        });
+        console.log(adminUser);
+
+        const users = await userCollection.find().toArray();
+        console.log(users);
+        res.send(users);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch users" });
+      }
+    });
+
+    app.patch(
+      "/admin/make-decorator/:email",
+      verifyFBToken,
+      async (req, res) => {
+        const email = req.params.email;
+
+        const result = await userCollection.updateOne(
+          { email },
+          { $set: { role: "decorator", status: "approved" } }
+        );
+
+        res.send(result);
+      }
+    );
+
+    app.get("/admin/revenue", async (req, res) => {
+      const payments = await paymentCollection.find().toArray();
+
+      const totalRevenue = payments.reduce(
+        (sum, payment) => sum + payment.amount,
+        0
+      );
+
+      res.send({ totalRevenue });
+    });
+    app.get("/admin/bookings", async (req, res) => {
+      const bookings = await bookingsCollection.find().toArray();
+      res.send(bookings);
+    });
+    app.get("/admin/decorators", async (req, res) => {
+      const decorators = await userCollection
+        .find({ role: "decorator", status: "approved" })
+        .project({ email: 1, name: 1 })
+        .toArray();
+
+      res.send(decorators);
+    });
+    app.patch("/admin/assign-decorator/:id", async (req, res) => {
+      const { id } = req.params;
+      const { decoratorEmail } = req.body;
+
+      const booking = await bookingsCollection.findOne({
+        _id: new ObjectId(id),
+      });
+
+      if (!booking) {
+        return res.status(404).send({ message: "Booking not found" });
+      }
+
+      if (booking.paymentStatus !== "paid") {
+        return res.status(403).send({ message: "Payment required" });
+      }
+
+      const result = await bookingsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            assignedDecorator: decoratorEmail,
+            status: "assigned",
+          },
+        }
+      );
+
+      res.send(result);
+    });
+    app.patch("/admin/bookings/:id", async (req, res) => {
+      const { id } = req.params;
+      const updateData = req.body;
+
+      const result = await bookingsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: updateData }
+      );
+
+      res.send(result);
+    });
+
+    app.delete("/admin/bookings/:id", async (req, res) => {
+      const { id } = req.params;
+
+      const result = await bookingsCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+
+      res.send(result);
+    });
+    app.get("/admin/analytics", async (req, res) => {
+      const serviceDemand = await bookingsCollection
+        .aggregate([
+          {
+            $group: {
+              _id: "$service_name",
+              count: { $sum: 1 },
+            },
+          },
+        ])
+        .toArray();
+      const bookingHistogram = await bookingsCollection
+        .aggregate([
+          {
+            $group: {
+              _id: "$bookingDate",
+              totalBookings: { $sum: 1 },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ])
+        .toArray();
+
+      res.send({
+        serviceDemand,
+        bookingHistogram,
+      });
+    });
+
+    app.get("/decorator/projects/:email", async (req, res) => {
+      const email = req.params.email;
+
+      const projects = await bookingsCollection
+        .find({
+          assignedDecorator: email,
+          paymentStatus: "paid",
+        })
+        .toArray();
+
+      res.send(projects);
+    });
+    app.patch("/decorator/update-status/:id", async (req, res) => {
+      const id = req.params.id;
+      const { nextStatus } = req.body;
+
+      const booking = await bookingsCollection.findOne({
+        _id: new ObjectId(id),
+      });
+
+      const currentIndex = statusFlow.indexOf(booking.serviceProgress);
+      const nextIndex = statusFlow.indexOf(nextStatus);
+
+      if (nextIndex !== currentIndex + 1) {
+        return res.status(400).send({
+          message: "Invalid status progression",
+        });
+      }
+
+      const result = await bookingsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            serviceProgress: nextStatus,
+            status: nextStatus === "Completed" ? "completed" : booking.status,
+          },
+        }
+      );
+
+      res.send(result);
     });
 
     // Send a ping to confirm a successful connection
