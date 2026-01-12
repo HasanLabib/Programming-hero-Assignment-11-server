@@ -25,10 +25,12 @@ app.use(cors());
 app.use(express.json());
 
 var admin = require("firebase-admin");
+console.log("Admin", admin);
 const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
   "utf8"
 );
 const serviceAccount = JSON.parse(decoded);
+
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
@@ -76,7 +78,7 @@ app.get("/", (req, res) => {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
     const decorationDb = client.db("decorationDB");
     const userCollection = decorationDb.collection("users");
     const googleUserCollection = decorationDb.collection("googleusers");
@@ -381,7 +383,8 @@ async function run() {
 
         booking.userEmail = req.decoded_email;
         booking.createdAt = new Date();
-        booking.status = "pending"; // pending by default
+        booking.status = "pending";
+        booking.paymentStatus = "unpaid";
 
         const requiredFields = [
           "serviceId",
@@ -400,6 +403,7 @@ async function run() {
           message: "Booking created successfully",
           bookingId: result.insertedId,
         });
+        res.send({ bookingId: result.insertedId });
       } catch (err) {
         console.error(err);
         res.status(500).json({ message: "Failed to create booking" });
@@ -415,18 +419,6 @@ async function run() {
       } catch (err) {
         res.status(500).json({ message: "Failed to fetch bookings" });
       }
-    });
-    app.post("/bookings", verifyFBToken, async (req, res) => {
-      const booking = {
-        ...req.body,
-        userEmail: req.decoded_email,
-        status: "pending",
-        paymentStatus: "unpaid",
-        createdAt: new Date(),
-      };
-
-      const result = await bookingsCollection.insertOne(booking);
-      res.send({ bookingId: result.insertedId });
     });
 
     app.get("/bookings/user/:email", verifyFBToken, async (req, res) => {
@@ -495,10 +487,10 @@ async function run() {
         const adminUser = await userCollection.findOne({
           email: req.decoded_email,
         });
-       // console.log(adminUser);
+        // console.log(adminUser);
 
         const users = await userCollection.find().toArray();
-       // console.log(users);
+        // console.log(users);
         res.send(users);
       } catch (err) {
         res.status(500).send({ message: "Failed to fetch users" });
@@ -564,6 +556,8 @@ async function run() {
           $set: {
             assignedDecorator: decoratorEmail,
             status: "assigned",
+            serviceProgress: "Assigned",
+            assignedAt: new Date(),
           },
         }
       );
@@ -620,49 +614,60 @@ async function run() {
       });
     });
 
-    app.get("/decorator/projects/:email", async (req, res) => {
+    app.get("/decorator/projects/:email", verifyFBToken, async (req, res) => {
       const email = req.params.email;
 
       const projects = await bookingsCollection
         .find({
           assignedDecorator: email,
           paymentStatus: "paid",
+          status: { $in: statusFlow },
         })
         .toArray();
 
       res.send(projects);
     });
-    app.patch("/decorator/update-status/:id", async (req, res) => {
-      const id = req.params.id;
-      const { nextStatus } = req.body;
+    app.patch(
+      "/decorator/update-status/:id",
+      verifyFBToken,
+      async (req, res) => {
+        const id = req.params.id;
+        const { nextStatus } = req.body;
 
-      const booking = await bookingsCollection.findOne({
-        _id: new ObjectId(id),
-      });
-
-      const currentIndex = statusFlow.indexOf(booking.serviceProgress);
-      const nextIndex = statusFlow.indexOf(nextStatus);
-
-      if (nextIndex !== currentIndex + 1) {
-        return res.status(400).send({
-          message: "Invalid status progression",
+        const booking = await bookingsCollection.findOne({
+          _id: new ObjectId(id),
+          assignedDecorator: req.email,
         });
-      }
 
-      const result = await bookingsCollection.updateOne(
-        { _id: new ObjectId(id) },
-        {
-          $set: {
-            serviceProgress: nextStatus,
-            status: nextStatus === "Completed" ? "completed" : booking.status,
-          },
+        const currentIndex = statusFlow.indexOf(booking.serviceProgress);
+        const nextIndex = statusFlow.indexOf(nextStatus);
+
+        if (nextIndex !== currentIndex + 1) {
+          return res.status(400).send({
+            message: "Invalid status progression",
+          });
         }
-      );
 
-      res.send(result);
-    });
-    app.get("/decorator/earnings/:email", async (req, res) => {
+        const result = await bookingsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              serviceProgress: nextStatus,
+              status: nextStatus === "Completed" ? "completed" : booking.status,
+              lastUpdated: new Date(),
+            },
+          }
+        );
+
+        res.send(result);
+      }
+    );
+    app.get("/decorator/earnings/:email", verifyFBToken, async (req, res) => {
       const email = req.params.email;
+
+      if (email !== req.email) {
+        return res.status(403).send({ message: "Forbidden" });
+      }
 
       const result = await bookingsCollection
         .aggregate([
@@ -692,7 +697,7 @@ async function run() {
     });
 
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
+    //await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );

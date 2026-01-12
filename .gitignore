@@ -5,3 +5,4 @@ node_modules
 .env
 
 decoration-booking-firebase-adminsdk-fbsvc-b86b2d7ed5.json
+.vercel
